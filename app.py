@@ -5,13 +5,16 @@ import seaborn as sns
 import io
 from datetime import timedelta
 
-st.set_page_config(page_title="Análisis de Espera en Losa", layout="wide")
+st.set_page_config(page_title="Dashboard de Operaciones Aeropuerto", layout="wide")
 
-st.title("Mapa de Calor: Pasajeros con +30 min de espera en losa ✈️")
-st.markdown("""
-Sube tu archivo CSV para visualizar los patrones de espera por semana. 
-La aplicación generará un resumen ejecutivo, mapas de calor por cada semana y un reporte en Excel con los colores ya aplicados.
-""")
+st.title("Análisis Operativo: Aeropuerto ✈️")
+st.markdown("Selecciona el tipo de estudio que deseas realizar y luego carga el archivo CSV correspondiente.")
+
+# 1. Selector del tipo de análisis
+tipo_analisis = st.radio(
+    "¿Qué quieres estudiar hoy?",
+    ("Distribución espera en losa (+30 min)", "Distribución de la impuntualidad (Off Time)")
+)
 
 # Diccionario para traducir meses
 MESES = {
@@ -22,23 +25,47 @@ MESES = {
 
 # Color morado estilo Cabify
 CABIFY_PURPLE = "#7142FF"
-# Crear un mapa de colores (colormap) que va de blanco a morado
 cabify_cmap = sns.light_palette(CABIFY_PURPLE, as_cmap=True)
 
-uploaded_file = st.file_uploader("Carga el archivo CSV", type=['csv'])
+uploaded_file = st.file_uploader("Carga tu archivo CSV aquí", type=['csv'])
 
 if uploaded_file is not None:
     try:
-        # 1. Lectura y preparación de datos
+        # Lectura base
         df = pd.read_csv(uploaded_file, sep=';')
-        df['tm_start_local_at'] = pd.to_datetime(df['tm_start_local_at'], format='%d/%m/%Y %H:%M:%S')
+        df['tm_start_local_at'] = pd.to_datetime(df['tm_start_local_at'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
+        df = df.dropna(subset=['tm_start_local_at'])
         
-        # Filtrar solo esperas +30 minutos
-        categorias_espera = ['03. 30 - 45 min', '04. 45+']
-        filtered_df = df[df['Segmento Tiempo en Losa'].isin(categorias_espera)].copy()
-        
+        # 2. Lógica y filtrado dinámico según la selección del usuario
+        if tipo_analisis == "Distribución espera en losa (+30 min)":
+            # Validación de seguridad
+            if 'Segmento Tiempo en Losa' not in df.columns:
+                st.error("⚠️ El archivo cargado no parece ser el de 'Espera en Losa' (falta la columna requerida). Verifica el archivo o cambia el tipo de análisis arriba.")
+                st.stop()
+            
+            categorias_espera = ['03. 30 - 45 min', '04. 45+']
+            filtered_df = df[df['Segmento Tiempo en Losa'].isin(categorias_espera)].copy()
+            
+            # Variables de texto dinámico para este análisis
+            titulo_metrica = "Pasajeros Afectados (+30 min)"
+            texto_resumen = "experimentaron esperas superiores a 30 minutos en losa."
+            nombre_archivo_excel = "reporte_espera_losa_cabify.xlsx"
+            
+        else: # Distribución de la impuntualidad (Off Time)
+            # Validación de seguridad
+            if 'Segment Arrived to Airport vs Requested' not in df.columns:
+                st.error("⚠️ El archivo cargado no parece ser el de 'On Time' (falta la columna requerida). Verifica el archivo o cambia el tipo de análisis arriba.")
+                st.stop()
+                
+            filtered_df = df[df['Segment Arrived to Airport vs Requested'] != '02. A tiempo (0-20 min antes)'].copy()
+            
+            # Variables de texto dinámico para este análisis
+            titulo_metrica = "Pasajeros Impuntuales (Off Time)"
+            texto_resumen = "llegaron al aeropuerto con un desfase importante respecto a su solicitud inicial (muy antes o muy tarde)."
+            nombre_archivo_excel = "reporte_impuntualidad_cabify.xlsx"
+
         if filtered_df.empty:
-            st.warning("No se encontraron registros con esperas mayores a 30 minutos en este archivo.")
+            st.warning("No se encontraron registros que cumplan con los criterios para este análisis en el archivo subido.")
         else:
             # Extraer variables temporales
             filtered_df['hour'] = filtered_df['tm_start_local_at'].dt.hour
@@ -46,9 +73,8 @@ if uploaded_file is not None:
             dias_espanol = {0: 'Lunes', 1: 'Martes', 2: 'Miércoles', 3: 'Jueves', 4: 'Viernes', 5: 'Sábado', 6: 'Domingo'}
             filtered_df['day_of_week'] = filtered_df['day_of_week_num'].map(dias_espanol)
             filtered_df['week'] = filtered_df['tm_start_local_at'].dt.isocalendar().week
-            filtered_df['year'] = filtered_df['tm_start_local_at'].dt.year
 
-            # 2. Resumen Ejecutivo Automático
+            # --- Resumen Ejecutivo Automático ---
             st.header("📝 Resumen Ejecutivo")
             total_afectados = filtered_df['# Riders'].sum()
             
@@ -60,39 +86,32 @@ if uploaded_file is not None:
             peor_semana_valor = peor_semana_datos.max()
             
             col_res1, col_res2, col_res3 = st.columns(3)
-            col_res1.metric("Total Pasajeros Afectados (+30 min)", f"{total_afectados:,}")
-            col_res2.metric("Pico Crítico (Global)", f"{pico_global[0]} a las {pico_global[1]}:00", f"{pico_global_valor} pasajeros")
-            col_res3.metric("Semana más crítica", f"Semana {peor_semana}", f"{peor_semana_valor} pasajeros")
+            col_res1.metric(f"Total {titulo_metrica}", f"{total_afectados:,}")
+            col_res2.metric("Pico Crítico (Global)", f"{pico_global[0]} a las {pico_global[1]}:00", f"{pico_global_valor} casos")
+            col_res3.metric("Semana más crítica", f"Semana {peor_semana}", f"{peor_semana_valor} casos")
             
-            st.markdown(f"""
-            > **Análisis rápido:** Durante el periodo analizado, un total de **{total_afectados} pasajeros** experimentaron esperas superiores a 30 minutos en losa. 
-            El momento de mayor tensión operativa ocurrió los días **{pico_global[0]} a las {pico_global[1]}:00 horas**, acumulando un total de {pico_global_valor} incidentes de espera prolongada. 
-            La semana que presentó mayores desafíos fue la **Semana {peor_semana}**.
-            """)
+            st.markdown(f"> **Análisis rápido:** Durante el periodo evaluado, un total de **{total_afectados} pasajeros** {texto_resumen} El momento de mayor tensión operativa a nivel general ocurrió los días **{pico_global[0]} a las {pico_global[1]}:00 horas**, acumulando un total de {pico_global_valor} casos. La semana que presentó mayores desafíos fue la **Semana {peor_semana}**.")
             st.divider()
 
-            # 3. Preparar Excel en memoria (con xlsxwriter para los colores)
+            # --- Preparar Excel en memoria ---
             output = io.BytesIO()
             writer = pd.ExcelWriter(output, engine='xlsxwriter')
             workbook = writer.book
-            
-            # Formato para porcentajes en Excel
             pct_format = workbook.add_format({'num_format': '0.00%'})
             
             filtered_df.to_excel(writer, sheet_name='Detalle_Completo', index=False)
 
-            # 4. Generar Mapas de Calor por Semana
+            # --- Generar Mapas de Calor por Semana ---
             semanas = sorted(filtered_df['week'].unique())
             days_order = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
 
             for week in semanas:
                 week_df = filtered_df[filtered_df['week'] == week]
                 
-                # Calcular fechas de la semana
+                # Calcular rango de fechas
                 una_fecha = week_df['tm_start_local_at'].iloc[0]
                 lunes = una_fecha - timedelta(days=una_fecha.weekday())
                 domingo = lunes + timedelta(days=6)
-                
                 mes_lunes = MESES[lunes.month]
                 mes_domingo = MESES[domingo.month]
                 
@@ -103,7 +122,7 @@ if uploaded_file is not None:
                 
                 st.subheader(titulo_semana)
 
-                # --- Lógica de Datos ---
+                # Tablas dinámicas
                 pivot_abs = week_df.pivot_table(index='day_of_week', columns='hour', values='# Riders', aggfunc='sum').reindex(days_order)
                 for h in range(24):
                     if h not in pivot_abs.columns:
@@ -111,36 +130,29 @@ if uploaded_file is not None:
                 pivot_abs = pivot_abs[range(24)].fillna(0)
                 
                 total_pasajeros_semana = pivot_abs.values.sum()
-                
-                # Para la gráfica en Streamlit usamos base 100
                 pivot_pct_web = (pivot_abs / total_pasajeros_semana) * 100 if total_pasajeros_semana > 0 else pivot_abs
-                
-                # Para el Excel usamos base 1 (0 a 1) para que el formato de Excel % funcione correcto
                 pivot_pct_excel = (pivot_abs / total_pasajeros_semana) if total_pasajeros_semana > 0 else pivot_abs
 
-                # --- Guardado y Pintado en Excel ---
+                # Guardar en Excel con color
                 pivot_abs.to_excel(writer, sheet_name=f'S{week}_Absoluto')
                 pivot_pct_excel.to_excel(writer, sheet_name=f'S{week}_Porcentaje')
                 
                 filas_excel = len(pivot_abs)
                 cols_excel = len(pivot_abs.columns)
                 
-                # Pintar pestaña de Absolutos
                 ws_abs = writer.sheets[f'S{week}_Absoluto']
                 ws_abs.conditional_format(1, 1, filas_excel, cols_excel, 
                                           {'type': '2_color_scale', 'min_color': '#FFFFFF', 'max_color': CABIFY_PURPLE})
                 
-                # Pintar pestaña de Porcentajes
                 ws_pct = writer.sheets[f'S{week}_Porcentaje']
                 ws_pct.set_column(1, cols_excel, None, pct_format)
                 ws_pct.conditional_format(1, 1, filas_excel, cols_excel, 
                                           {'type': '2_color_scale', 'min_color': '#FFFFFF', 'max_color': CABIFY_PURPLE})
 
-                # --- Renderizar gráficos en la App ---
+                # Visualización en la web
                 col1, col2 = st.columns(2)
-                
                 with col1:
-                    st.markdown("**Cantidad de pasajeros (+30 min)**")
+                    st.markdown(f"**Volumen Absoluto - {titulo_metrica}**")
                     fig1, ax1 = plt.subplots(figsize=(10, 5))
                     sns.heatmap(pivot_abs, ax=ax1, cmap=cabify_cmap, annot=True, fmt='g', linewidths=.5)
                     ax1.set_xlabel('Hora del Día')
@@ -148,35 +160,32 @@ if uploaded_file is not None:
                     st.pyplot(fig1)
                     
                 with col2:
-                    st.markdown("**Porcentaje de pasajeros (+30 min)**")
+                    st.markdown("**Distribución Relativa (%)**")
                     fig2, ax2 = plt.subplots(figsize=(10, 5))
-                    # fmt='.2f' genera el número con 2 decimales, luego cambiamos punto por coma
                     sns.heatmap(pivot_pct_web, ax=ax2, cmap=cabify_cmap, annot=True, fmt='.2f', linewidths=.5)
                     for t in ax2.texts:
                         texto_actual = t.get_text()
-                        # Si es "0.00", se transforma a "0,00%"
                         t.set_text(texto_actual.replace('.', ',') + "%")
-                        
                     ax2.set_xlabel('Hora del Día')
                     ax2.set_ylabel('')
                     st.pyplot(fig2)
                     
                 st.write("") 
 
-            # 5. Cerrar Excel
+            # --- Cierre y Descarga ---
             writer.close()
             excel_data = output.getvalue()
             
             st.divider()
-            st.subheader("📥 Descargar Datos con Mapa de Calor")
-            st.markdown("Descarga un archivo Excel. Las pestañas de cada semana ya vienen con el estilo de color aplicado a las celdas.")
+            st.subheader("📥 Descargar Reporte")
+            st.markdown("Descarga el Excel con las pestañas coloreadas y listas para presentar.")
             st.download_button(
                 label="Descargar Reporte en Excel",
                 data=excel_data,
-                file_name="reporte_espera_losa_cabify.xlsx",
+                file_name=nombre_archivo_excel,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
     except Exception as e:
-        st.error(f"Ocurrió un error al procesar el archivo: {e}")
-        st.markdown("Verifica que el archivo tenga el formato correcto y use ';' como separador.")
+        st.error(f"Ocurrió un error general: {e}")
+        st.markdown("Por favor revisa el archivo subido.")
