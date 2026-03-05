@@ -16,7 +16,8 @@ tipo_analisis = st.radio(
     (
         "Distribución espera en losa (+30 min)", 
         "Distribución de la impuntualidad (Off Time)",
-        "Disponibilidad de Flota (Vans)"
+        "Disponibilidad de Flota (Vans)",
+        "Demanda de Reservas (Ventas Compartidas)"
     )
 )
 
@@ -32,8 +33,10 @@ CABIFY_PURPLE = "#7142FF"
 cabify_cmap = sns.light_palette(CABIFY_PURPLE, as_cmap=True)
 VANS_BLUE = "#1E90FF"
 vans_cmap = "Blues"
+SALES_GREEN = "#2E8B57"
+sales_cmap = "Greens"
 
-# AHORA ACEPTAMOS CSV Y XLSX
+# ACEPTAMOS CSV Y XLSX
 uploaded_file = st.file_uploader("Carga tu archivo aquí (CSV o Excel)", type=['csv', 'xlsx'])
 
 if uploaded_file is not None:
@@ -46,7 +49,7 @@ if uploaded_file is not None:
         else:
             try:
                 df = pd.read_csv(uploaded_file, sep=';')
-                if len(df.columns) < 3:  # Probablemente era separado por comas
+                if len(df.columns) < 3: 
                     uploaded_file.seek(0)
                     df = pd.read_csv(uploaded_file, sep=',')
             except:
@@ -58,30 +61,27 @@ if uploaded_file is not None:
         # ==========================================
         if tipo_analisis == "Disponibilidad de Flota (Vans)":
             if 'Patente' not in df.columns or 'Fecha de Operación' not in df.columns:
-                st.error("⚠️ El archivo cargado no parece ser el de 'Disponibilidad de Flota'. Verifica el archivo o cambia el tipo de análisis.")
+                st.error("⚠️ El archivo cargado no parece ser el de 'Disponibilidad de Flota'. Verifica el archivo.")
                 st.stop()
                 
             df['Fecha de Operación'] = pd.to_datetime(df['Fecha de Operación'], errors='coerce')
             df['Hora'] = pd.to_numeric(df['Hora'], errors='coerce')
             df = df.dropna(subset=['Hora', 'Fecha de Operación'])
             
-            # Agrupar por fecha y hora exacta
             daily_hourly = df.groupby(['Fecha de Operación', 'Hora'])['Patente'].nunique().reset_index()
-            
-            # Renombrar columnas para usar el mismo bucle de renderizado posterior
             daily_hourly['tm_start_local_at'] = daily_hourly['Fecha de Operación']
             daily_hourly['hour'] = daily_hourly['Hora']
             daily_hourly['valor_metrica'] = daily_hourly['Patente']
             filtered_df = daily_hourly.copy()
             
             titulo_metrica = "Promedio de Vans Activas"
+            unidad_medida = "vans"
             nombre_archivo_excel = "reporte_disponibilidad_vans.xlsx"
             agg_func = 'mean'
             color_map = vans_cmap
             excel_color = VANS_BLUE
             mostrar_porcentaje = False
 
-            # --- Resumen Ejecutivo de Vans ---
             st.header("📝 Resumen Ejecutivo")
             if not filtered_df.empty:
                 promedio_global = filtered_df['valor_metrica'].mean()
@@ -98,6 +98,53 @@ if uploaded_file is not None:
                 col_res3.metric("Total Patentes Únicas", f"{df['Patente'].nunique()}")
                 
                 st.markdown(f"> **Análisis rápido:** La flota operativa mantiene un promedio de **{promedio_global:.1f} vans** activas por franja horaria. El bloque con mayor disponibilidad histórica es el **{pico_global[0]} a las {pico_global[1]}:00**.")
+                st.divider()
+
+        # ==========================================
+        # LÓGICA: DEMANDA DE VENTAS COMPARTIDAS
+        # ==========================================
+        elif tipo_analisis == "Demanda de Reservas (Ventas Compartidas)":
+            if 'ds_product_name' not in df.columns or 'createdAt_local' not in df.columns:
+                st.error("⚠️ El archivo cargado no parece ser la Base de Datos de Comisiones/Ventas. Verifica el archivo.")
+                st.stop()
+                
+            filtered_df = df[df['ds_product_name'] == 'van_compartida'].copy()
+            filtered_df['tm_start_local_at'] = pd.to_datetime(filtered_df['createdAt_local'], errors='coerce')
+            filtered_df = filtered_df.dropna(subset=['tm_start_local_at'])
+            
+            filtered_df['hour'] = filtered_df['tm_start_local_at'].dt.hour
+            filtered_df['valor_metrica'] = 1  # Cada fila equivale a 1 reserva
+            
+            titulo_metrica = "Volumen de Reservas Creadas"
+            unidad_medida = "reservas"
+            texto_resumen = "fueron generadas en modalidad de servicio compartido."
+            nombre_archivo_excel = "reporte_demanda_ventas.xlsx"
+            agg_func = 'sum'
+            color_map = sales_cmap
+            excel_color = SALES_GREEN
+            mostrar_porcentaje = False
+
+            st.header("📝 Resumen Ejecutivo")
+            if not filtered_df.empty:
+                dias_espanol = {0: 'Lunes', 1: 'Martes', 2: 'Miércoles', 3: 'Jueves', 4: 'Viernes', 5: 'Sábado', 6: 'Domingo'}
+                filtered_df['day_of_week_num'] = filtered_df['tm_start_local_at'].dt.dayofweek
+                filtered_df['day_of_week'] = filtered_df['day_of_week_num'].map(dias_espanol)
+                filtered_df['week'] = filtered_df['tm_start_local_at'].dt.isocalendar().week
+                
+                total_afectados = filtered_df['valor_metrica'].sum()
+                pico_global = filtered_df.groupby(['day_of_week', 'hour'])['valor_metrica'].sum().idxmax()
+                pico_global_valor = filtered_df.groupby(['day_of_week', 'hour'])['valor_metrica'].sum().max()
+                
+                peor_semana_datos = filtered_df.groupby('week')['valor_metrica'].sum()
+                peor_semana = peor_semana_datos.idxmax()
+                peor_semana_valor = peor_semana_datos.max()
+                
+                col_res1, col_res2, col_res3 = st.columns(3)
+                col_res1.metric(f"Total {titulo_metrica}", f"{total_afectados:,.0f}")
+                col_res2.metric("Pico de Demanda (Global)", f"{pico_global[0]} a las {pico_global[1]}:00", f"{pico_global_valor:,.0f} {unidad_medida}")
+                col_res3.metric("Semana de mayor venta", f"Semana {peor_semana}", f"{peor_semana_valor:,.0f} {unidad_medida}")
+                
+                st.markdown(f"> **Análisis rápido:** Durante el periodo evaluado, un total de **{total_afectados:,.0f} {unidad_medida}** {texto_resumen} El momento de mayor demanda de vehículos ocurrió los días **{pico_global[0]} a las {pico_global[1]}:00 horas**.")
                 st.divider()
 
         # ==========================================
@@ -128,12 +175,12 @@ if uploaded_file is not None:
 
             filtered_df['hour'] = filtered_df['tm_start_local_at'].dt.hour
             filtered_df['valor_metrica'] = filtered_df['# Riders']
+            unidad_medida = "pasajeros"
             agg_func = 'sum'
             color_map = cabify_cmap
             excel_color = CABIFY_PURPLE
             mostrar_porcentaje = True
 
-            # --- Resumen Ejecutivo Losa/Off Time ---
             st.header("📝 Resumen Ejecutivo")
             if not filtered_df.empty:
                 dias_espanol = {0: 'Lunes', 1: 'Martes', 2: 'Miércoles', 3: 'Jueves', 4: 'Viernes', 5: 'Sábado', 6: 'Domingo'}
@@ -151,10 +198,10 @@ if uploaded_file is not None:
                 
                 col_res1, col_res2, col_res3 = st.columns(3)
                 col_res1.metric(f"Total {titulo_metrica}", f"{total_afectados:,.0f}")
-                col_res2.metric("Pico Crítico (Global)", f"{pico_global[0]} a las {pico_global[1]}:00", f"{pico_global_valor:,.0f} casos")
-                col_res3.metric("Semana más crítica", f"Semana {peor_semana}", f"{peor_semana_valor:,.0f} casos")
+                col_res2.metric("Pico Crítico (Global)", f"{pico_global[0]} a las {pico_global[1]}:00", f"{pico_global_valor:,.0f} {unidad_medida}")
+                col_res3.metric("Semana más crítica", f"Semana {peor_semana}", f"{peor_semana_valor:,.0f} {unidad_medida}")
                 
-                st.markdown(f"> **Análisis rápido:** Durante el periodo evaluado, un total de **{total_afectados:,.0f} pasajeros** {texto_resumen} El momento de mayor tensión ocurrió los días **{pico_global[0]} a las {pico_global[1]}:00 horas**, acumulando un total de {pico_global_valor:,.0f} casos.")
+                st.markdown(f"> **Análisis rápido:** Durante el periodo evaluado, un total de **{total_afectados:,.0f} {unidad_medida}** {texto_resumen} El momento de mayor tensión ocurrió los días **{pico_global[0]} a las {pico_global[1]}:00 horas**, acumulando un total de {pico_global_valor:,.0f} casos.")
                 st.divider()
 
         # ==========================================
@@ -177,7 +224,6 @@ if uploaded_file is not None:
             for week in semanas:
                 week_df = filtered_df[filtered_df['week'] == week]
                 
-                # Calcular rango de fechas
                 una_fecha = week_df['tm_start_local_at'].iloc[0]
                 lunes = una_fecha - timedelta(days=una_fecha.weekday())
                 domingo = lunes + timedelta(days=6)
@@ -191,14 +237,12 @@ if uploaded_file is not None:
                 
                 st.subheader(titulo_semana)
 
-                # Pivot Absoluto / Promedio
                 pivot_abs = week_df.pivot_table(index='day_of_week', columns='hour', values='valor_metrica', aggfunc=agg_func).reindex(days_order)
                 for h in range(24):
                     if h not in pivot_abs.columns:
                         pivot_abs[h] = 0
                 pivot_abs = pivot_abs[range(24)].fillna(0)
                 
-                # Guardar en Excel
                 pivot_abs.to_excel(writer, sheet_name=f'S{week}_Absoluto')
                 filas_excel = len(pivot_abs)
                 cols_excel = len(pivot_abs.columns)
@@ -206,11 +250,8 @@ if uploaded_file is not None:
                 ws_abs.conditional_format(1, 1, filas_excel, cols_excel, 
                                           {'type': '2_color_scale', 'min_color': '#FFFFFF', 'max_color': excel_color})
                 
-                # Dibujar gráficos web
                 if mostrar_porcentaje:
                     col1, col2 = st.columns(2)
-                    
-                    # Gráfico 1: Absoluto
                     with col1:
                         st.markdown(f"**Volumen Absoluto - {titulo_metrica}**")
                         fig1, ax1 = plt.subplots(figsize=(10, 5))
@@ -219,7 +260,6 @@ if uploaded_file is not None:
                         ax1.set_ylabel('Día de la Semana')
                         st.pyplot(fig1)
                         
-                    # Gráfico 2: Porcentaje
                     with col2:
                         total_pasajeros_semana = pivot_abs.values.sum()
                         pivot_pct_web = (pivot_abs / total_pasajeros_semana) * 100 if total_pasajeros_semana > 0 else pivot_abs
@@ -241,17 +281,15 @@ if uploaded_file is not None:
                         ax2.set_ylabel('')
                         st.pyplot(fig2)
                 else:
-                    # RENDERIZADO PARA VANS (Solo una columna central)
                     st.markdown(f"**{titulo_metrica}**")
                     fig1, ax1 = plt.subplots(figsize=(12, 4))
-                    sns.heatmap(pivot_abs, ax=ax1, cmap=color_map, annot=True, fmt='.1f', linewidths=.5)
+                    sns.heatmap(pivot_abs, ax=ax1, cmap=color_map, annot=True, fmt='.0f', linewidths=.5)
                     ax1.set_xlabel('Hora del Día')
                     ax1.set_ylabel('Día de la Semana')
                     st.pyplot(fig1)
 
                 st.write("") 
 
-            # --- Cierre y Descarga ---
             writer.close()
             excel_data = output.getvalue()
             
