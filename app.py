@@ -10,14 +10,14 @@ st.set_page_config(page_title="Dashboard de Operaciones Aeropuerto", layout="wid
 st.title("Análisis Operativo: Aeropuerto ✈️")
 st.markdown("Selecciona el tipo de estudio que deseas realizar y luego carga el archivo correspondiente.")
 
-# 1. Selector del tipo de análisis
+# 1. Selector del tipo de análisis principal
 tipo_analisis = st.radio(
     "¿Qué quieres estudiar hoy?",
     (
         "Distribución espera en losa (+30 min)", 
         "Distribución de la impuntualidad (Off Time)",
         "Disponibilidad de Flota (Vans)",
-        "Demanda de Reservas (Ventas Compartidas)"
+        "Demanda de Reservas (Ventas)"
     )
 )
 
@@ -28,13 +28,11 @@ MESES = {
     9: 'septiembre', 10: 'octubre', 11: 'noviembre', 12: 'diciembre'
 }
 
-# Colores y estilos
+# Colores Base corporativos
 CABIFY_PURPLE = "#7142FF"
 cabify_cmap = sns.light_palette(CABIFY_PURPLE, as_cmap=True)
 VANS_BLUE = "#1E90FF"
 vans_cmap = "Blues"
-SALES_GREEN = "#2E8B57"
-sales_cmap = "Greens"
 
 # ACEPTAMOS CSV Y XLSX
 uploaded_file = st.file_uploader("Carga tu archivo aquí (CSV o Excel)", type=['csv', 'xlsx'])
@@ -101,27 +99,50 @@ if uploaded_file is not None:
                 st.divider()
 
         # ==========================================
-        # LÓGICA: DEMANDA DE VENTAS COMPARTIDAS
+        # LÓGICA: DEMANDA DE VENTAS (COMPARTIDA/EXCLUSIVA/TOTAL)
         # ==========================================
-        elif tipo_analisis == "Demanda de Reservas (Ventas Compartidas)":
+        elif tipo_analisis == "Demanda de Reservas (Ventas)":
             if 'ds_product_name' not in df.columns or 'createdAt_local' not in df.columns:
                 st.error("⚠️ El archivo cargado no parece ser la Base de Datos de Comisiones/Ventas. Verifica el archivo.")
                 st.stop()
-                
-            filtered_df = df[df['ds_product_name'] == 'van_compartida'].copy()
+            
+            # Segmentador interactivo
+            st.markdown("### 📊 Segmentación de Demanda")
+            tipo_demanda = st.selectbox(
+                "Selecciona el tipo de servicio a analizar:",
+                ("Compartida", "Exclusiva", "Total")
+            )
+            
+            if tipo_demanda == "Compartida":
+                filtered_df = df[df['ds_product_name'] == 'van_compartida'].copy()
+                titulo_metrica = "Volumen de Reservas (Compartidas)"
+                texto_resumen = "fueron generadas en modalidad de servicio compartido."
+                nombre_archivo_excel = "reporte_ventas_compartidas.xlsx"
+                color_map = "Greens"
+                excel_color = "#2E8B57" # SeaGreen
+            elif tipo_demanda == "Exclusiva":
+                filtered_df = df[df['ds_product_name'] == 'van_exclusive'].copy()
+                titulo_metrica = "Volumen de Reservas (Exclusivas)"
+                texto_resumen = "fueron generadas en modalidad de servicio exclusivo."
+                nombre_archivo_excel = "reporte_ventas_exclusivas.xlsx"
+                color_map = "Oranges"
+                excel_color = "#FF8C00" # DarkOrange
+            else: # Total
+                filtered_df = df[df['ds_product_name'].isin(['van_compartida', 'van_exclusive'])].copy()
+                titulo_metrica = "Volumen de Reservas (Total)"
+                texto_resumen = "fueron generadas en total (sumando compartidas y exclusivas)."
+                nombre_archivo_excel = "reporte_ventas_totales.xlsx"
+                color_map = "PuBuGn"
+                excel_color = "#008080" # Teal
+
             filtered_df['tm_start_local_at'] = pd.to_datetime(filtered_df['createdAt_local'], errors='coerce')
             filtered_df = filtered_df.dropna(subset=['tm_start_local_at'])
             
             filtered_df['hour'] = filtered_df['tm_start_local_at'].dt.hour
             filtered_df['valor_metrica'] = 1  # Cada fila equivale a 1 reserva
             
-            titulo_metrica = "Volumen de Reservas Creadas"
             unidad_medida = "reservas"
-            texto_resumen = "fueron generadas en modalidad de servicio compartido."
-            nombre_archivo_excel = "reporte_demanda_ventas.xlsx"
             agg_func = 'sum'
-            color_map = sales_cmap
-            excel_color = SALES_GREEN
             mostrar_porcentaje = False
 
             st.header("📝 Resumen Ejecutivo")
@@ -144,7 +165,7 @@ if uploaded_file is not None:
                 col_res2.metric("Pico de Demanda (Global)", f"{pico_global[0]} a las {pico_global[1]}:00", f"{pico_global_valor:,.0f} {unidad_medida}")
                 col_res3.metric("Semana de mayor venta", f"Semana {peor_semana}", f"{peor_semana_valor:,.0f} {unidad_medida}")
                 
-                st.markdown(f"> **Análisis rápido:** Durante el periodo evaluado, un total de **{total_afectados:,.0f} {unidad_medida}** {texto_resumen} El momento de mayor demanda de vehículos ocurrió los días **{pico_global[0]} a las {pico_global[1]}:00 horas**.")
+                st.markdown(f"> **Análisis rápido:** Durante el periodo evaluado, un total de **{total_afectados:,.0f} {unidad_medida}** {texto_resumen} El momento de mayor demanda de vehículos para esta categoría ocurrió los días **{pico_global[0]} a las {pico_global[1]}:00 horas**.")
                 st.divider()
 
         # ==========================================
@@ -295,7 +316,7 @@ if uploaded_file is not None:
             
             st.divider()
             st.subheader("📥 Descargar Reporte")
-            st.markdown("Descarga el Excel con las matrices generadas.")
+            st.markdown("Descarga el Excel. Los colores de las celdas se ajustarán automáticamente según la segmentación seleccionada.")
             st.download_button(
                 label="Descargar Reporte en Excel",
                 data=excel_data,
