@@ -34,7 +34,6 @@ cabify_cmap = sns.light_palette(CABIFY_PURPLE, as_cmap=True)
 VANS_BLUE = "#1E90FF"
 vans_cmap = "Blues"
 
-# ACEPTAMOS CSV Y XLSX
 uploaded_file = st.file_uploader("Carga tu archivo aquí (CSV o Excel)", type=['csv', 'xlsx'])
 
 if uploaded_file is not None:
@@ -61,7 +60,7 @@ if uploaded_file is not None:
         # ==========================================
         if tipo_analisis == "Disponibilidad de Flota (Vans)":
             if 'Patente' not in df.columns or 'Fecha de Operación' not in df.columns:
-                st.error("⚠️ El archivo cargado no parece ser el de 'Disponibilidad de Flota'. Verifica el archivo.")
+                st.error("⚠️ El archivo cargado no parece ser el de 'Disponibilidad de Flota'.")
                 st.stop()
                 
             df['Fecha de Operación'] = pd.to_datetime(df['Fecha de Operación'], errors='coerce')
@@ -78,10 +77,9 @@ if uploaded_file is not None:
             daily_hourly['week'] = daily_hourly['tm_start_local_at'].dt.isocalendar().week
             
             filtered_df = daily_hourly.copy()
-            df_for_excel = filtered_df.copy() # Iguales para este caso
+            df_for_excel = filtered_df.copy()
             
             titulo_metrica = "Promedio de Vans Activas"
-            unidad_medida = "vans"
             nombre_archivo_excel = "reporte_disponibilidad_vans.xlsx"
             agg_func = 'mean'
             color_map = vans_cmap
@@ -99,7 +97,6 @@ if uploaded_file is not None:
                 col_res1.metric("Promedio Global (Vans/Hora)", f"{promedio_global:.1f}")
                 col_res2.metric("Pico de Disponibilidad", f"{pico_global[0]} a las {pico_global[1]}:00", f"{pico_global_valor:.1f} vans")
                 col_res3.metric("Total Patentes Únicas", f"{df['Patente'].nunique()}")
-                st.markdown(f"> **Análisis rápido:** La flota operativa mantiene un promedio de **{promedio_global:.1f} vans** activas por franja horaria. El bloque con mayor disponibilidad histórica es el **{pico_global[0]} a las {pico_global[1]}:00**.")
                 st.divider()
 
         # ==========================================
@@ -107,48 +104,45 @@ if uploaded_file is not None:
         # ==========================================
         elif tipo_analisis == "Demanda de Reservas (Ventas)":
             if 'ds_product_name' not in df.columns or 'createdAt_local' not in df.columns:
-                st.error("⚠️ El archivo cargado no parece ser la Base de Datos de Comisiones/Ventas. Verifica el archivo.")
+                st.error("⚠️ El archivo cargado no parece ser la Base de Datos de Ventas.")
                 st.stop()
             
-            # Segmentador interactivo solo para la vista WEB
+            # Segmentador interactivo para la WEB
             st.markdown("### 📊 Segmentación de Demanda en Pantalla")
             tipo_demanda = st.selectbox(
-                "Selecciona el tipo de servicio a analizar:",
+                "Selecciona el tipo de servicio a visualizar aquí:",
                 ("Compartida", "Exclusiva", "Total")
             )
             
-            # Preparar base COMPLETA para exportar las 3 pestañas a Excel
             df_full_demanda = df[df['ds_product_name'].isin(['van_compartida', 'van_exclusive'])].copy()
             df_full_demanda['tm_start_local_at'] = pd.to_datetime(df_full_demanda['createdAt_local'], errors='coerce')
             df_full_demanda = df_full_demanda.dropna(subset=['tm_start_local_at'])
             
             df_full_demanda['hour'] = df_full_demanda['tm_start_local_at'].dt.hour
             df_full_demanda['valor_metrica'] = 1 
+            df_full_demanda['Segmento'] = df_full_demanda['ds_product_name'].map({'van_compartida': 'Compartida', 'van_exclusive': 'Exclusiva'})
             df_full_demanda['day_of_week_num'] = df_full_demanda['tm_start_local_at'].dt.dayofweek
             df_full_demanda['day_of_week'] = df_full_demanda['day_of_week_num'].map(dias_espanol)
             df_full_demanda['week'] = df_full_demanda['tm_start_local_at'].dt.isocalendar().week
             
-            df_for_excel = df_full_demanda.copy() # Contiene TODO
+            df_for_excel = df_full_demanda.copy()
 
-            # Preparar base FILTRADA solo para el Resumen Ejecutivo y Gráfico Web
             if tipo_demanda == "Compartida":
-                filtered_df = df_full_demanda[df_full_demanda['ds_product_name'] == 'van_compartida'].copy()
+                filtered_df = df_full_demanda[df_full_demanda['Segmento'] == 'Compartida'].copy()
                 titulo_metrica = "Volumen de Reservas (Compartidas)"
-                texto_resumen = "fueron generadas en modalidad de servicio compartido."
+                color_map = "Greens"
             elif tipo_demanda == "Exclusiva":
-                filtered_df = df_full_demanda[df_full_demanda['ds_product_name'] == 'van_exclusive'].copy()
+                filtered_df = df_full_demanda[df_full_demanda['Segmento'] == 'Exclusiva'].copy()
                 titulo_metrica = "Volumen de Reservas (Exclusivas)"
-                texto_resumen = "fueron generadas en modalidad de servicio exclusivo."
-            else: # Total
+                color_map = "Oranges"
+            else:
                 filtered_df = df_full_demanda.copy()
                 titulo_metrica = "Volumen de Reservas (Total)"
-                texto_resumen = "fueron generadas en total (sumando compartidas y exclusivas)."
+                color_map = "PuBuGn"
             
-            unidad_medida = "reservas"
-            nombre_archivo_excel = "reporte_ventas_segmentado.xlsx"
+            nombre_archivo_excel = "reporte_ventas_interactivo.xlsx"
             agg_func = 'sum'
-            color_map = cabify_cmap     # ESTILO CABIFY APLICADO
-            excel_color = CABIFY_PURPLE # ESTILO CABIFY APLICADO
+            excel_color = "#008080" # Teal Base para el Excel
             mostrar_porcentaje = False
             heatmap_fmt = 'g'
 
@@ -157,15 +151,10 @@ if uploaded_file is not None:
                 total_afectados = filtered_df['valor_metrica'].sum()
                 pico_global = filtered_df.groupby(['day_of_week', 'hour'])['valor_metrica'].sum().idxmax()
                 pico_global_valor = filtered_df.groupby(['day_of_week', 'hour'])['valor_metrica'].sum().max()
-                peor_semana_datos = filtered_df.groupby('week')['valor_metrica'].sum()
-                peor_semana = peor_semana_datos.idxmax()
-                peor_semana_valor = peor_semana_datos.max()
                 
-                col_res1, col_res2, col_res3 = st.columns(3)
+                col_res1, col_res2 = st.columns(2)
                 col_res1.metric(f"Total {titulo_metrica}", f"{total_afectados:,.0f}")
-                col_res2.metric("Pico de Demanda (Global)", f"{pico_global[0]} a las {pico_global[1]}:00", f"{pico_global_valor:,.0f} {unidad_medida}")
-                col_res3.metric("Semana de mayor venta", f"Semana {peor_semana}", f"{peor_semana_valor:,.0f} {unidad_medida}")
-                st.markdown(f"> **Análisis rápido:** Durante el periodo evaluado, un total de **{total_afectados:,.0f} {unidad_medida}** {texto_resumen} El momento de mayor demanda de vehículos para esta categoría ocurrió los días **{pico_global[0]} a las {pico_global[1]}:00 horas**.")
+                col_res2.metric("Pico de Demanda", f"{pico_global[0]} a las {pico_global[1]}:00", f"{pico_global_valor:,.0f} reservas")
                 st.divider()
 
         # ==========================================
@@ -177,20 +166,18 @@ if uploaded_file is not None:
             
             if tipo_analisis == "Distribución espera en losa (+30 min)":
                 if 'Segmento Tiempo en Losa' not in df.columns:
-                    st.error("⚠️ El archivo cargado no parece ser el de 'Espera en Losa'. Verifica el archivo.")
+                    st.error("⚠️ El archivo cargado no parece ser el de 'Espera en Losa'.")
                     st.stop()
                 categorias_espera = ['03. 30 - 45 min', '04. 45+']
                 filtered_df = df[df['Segmento Tiempo en Losa'].isin(categorias_espera)].copy()
                 titulo_metrica = "Pasajeros Afectados (+30 min)"
-                texto_resumen = "experimentaron esperas superiores a 30 minutos en losa."
                 nombre_archivo_excel = "reporte_espera_losa.xlsx"
-            else: # Off Time
+            else:
                 if 'Segment Arrived to Airport vs Requested' not in df.columns:
-                    st.error("⚠️ El archivo cargado no parece ser el de 'On Time'. Verifica el archivo.")
+                    st.error("⚠️ El archivo cargado no parece ser el de 'On Time'.")
                     st.stop()
                 filtered_df = df[df['Segment Arrived to Airport vs Requested'] != '02. A tiempo (0-20 min antes)'].copy()
                 titulo_metrica = "Pasajeros Impuntuales (Off Time)"
-                texto_resumen = "llegaron al aeropuerto con un desfase importante."
                 nombre_archivo_excel = "reporte_impuntualidad.xlsx"
 
             filtered_df['hour'] = filtered_df['tm_start_local_at'].dt.hour
@@ -199,9 +186,7 @@ if uploaded_file is not None:
             filtered_df['day_of_week'] = filtered_df['day_of_week_num'].map(dias_espanol)
             filtered_df['week'] = filtered_df['tm_start_local_at'].dt.isocalendar().week
             
-            df_for_excel = filtered_df.copy() # Iguales
-            
-            unidad_medida = "pasajeros"
+            df_for_excel = filtered_df.copy()
             agg_func = 'sum'
             color_map = cabify_cmap
             excel_color = CABIFY_PURPLE
@@ -213,19 +198,14 @@ if uploaded_file is not None:
                 total_afectados = filtered_df['valor_metrica'].sum()
                 pico_global = filtered_df.groupby(['day_of_week', 'hour'])['valor_metrica'].sum().idxmax()
                 pico_global_valor = filtered_df.groupby(['day_of_week', 'hour'])['valor_metrica'].sum().max()
-                peor_semana_datos = filtered_df.groupby('week')['valor_metrica'].sum()
-                peor_semana = peor_semana_datos.idxmax()
-                peor_semana_valor = peor_semana_datos.max()
                 
-                col_res1, col_res2, col_res3 = st.columns(3)
+                col_res1, col_res2 = st.columns(2)
                 col_res1.metric(f"Total {titulo_metrica}", f"{total_afectados:,.0f}")
-                col_res2.metric("Pico Crítico (Global)", f"{pico_global[0]} a las {pico_global[1]}:00", f"{pico_global_valor:,.0f} {unidad_medida}")
-                col_res3.metric("Semana más crítica", f"Semana {peor_semana}", f"{peor_semana_valor:,.0f} {unidad_medida}")
-                st.markdown(f"> **Análisis rápido:** Durante el periodo evaluado, un total de **{total_afectados:,.0f} {unidad_medida}** {texto_resumen} El momento de mayor tensión ocurrió los días **{pico_global[0]} a las {pico_global[1]}:00 horas**, acumulando un total de {pico_global_valor:,.0f} casos.")
+                col_res2.metric("Pico Crítico (Global)", f"{pico_global[0]} a las {pico_global[1]}:00", f"{pico_global_valor:,.0f} casos")
                 st.divider()
 
         # ==========================================
-        # RENDERIZADO COMÚN DE MAPAS DE CALOR Y EXCEL
+        # RENDERIZADO DE EXCEL Y GRÁFICOS WEB
         # ==========================================
         if df_for_excel.empty:
             st.warning("No se encontraron registros válidos para analizar en el archivo subido.")
@@ -234,7 +214,15 @@ if uploaded_file is not None:
             writer = pd.ExcelWriter(output, engine='xlsxwriter')
             workbook = writer.book
             pct_format = workbook.add_format({'num_format': '0.00%'})
+            bold_format = workbook.add_format({'bold': True, 'bg_color': '#f3f3f3', 'border': 1})
+            
             df_for_excel.to_excel(writer, sheet_name='Detalle_Completo', index=False)
+
+            # Si es reporte de ventas, creamos una hoja secundaria oculta para las fórmulas del Excel
+            if tipo_analisis == "Demanda de Reservas (Ventas)":
+                df_pivot_data = df_for_excel[['week', 'day_of_week', 'hour', 'Segmento', 'valor_metrica']].copy()
+                df_pivot_data.to_excel(writer, sheet_name='Data_Pivot', index=False)
+                writer.sheets['Data_Pivot'].hide()
 
             semanas = sorted(df_for_excel['week'].unique())
             days_order = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
@@ -243,7 +231,6 @@ if uploaded_file is not None:
                 week_df_excel = df_for_excel[df_for_excel['week'] == week]
                 week_df_web = filtered_df[filtered_df['week'] == week] if not filtered_df.empty else pd.DataFrame()
                 
-                # Títulos Dinámicos
                 una_fecha = week_df_excel['tm_start_local_at'].iloc[0]
                 lunes = una_fecha - timedelta(days=una_fecha.weekday())
                 domingo = lunes + timedelta(days=6)
@@ -253,35 +240,40 @@ if uploaded_file is not None:
                     titulo_semana = f"Semana {week}: {lunes.day} al {domingo.day} de {mes_lunes} de {lunes.year}"
                 else:
                     titulo_semana = f"Semana {week}: {lunes.day} de {mes_lunes} al {domingo.day} de {mes_domingo} de {domingo.year}"
+                
                 st.subheader(titulo_semana)
 
-                # --- 1. GENERAR PESTAÑAS EN EXCEL SEGÚN ANÁLISIS ---
+                # --- 1. GENERAR PESTAÑAS EN EXCEL ---
                 if tipo_analisis == "Demanda de Reservas (Ventas)":
-                    # Exportar las 3 Pestañas siempre al Excel
-                    for nombre_seg, filtro_prod in [("Compartida", "van_compartida"), ("Exclusiva", "van_exclusive")]:
-                        df_seg = week_df_excel[week_df_excel['ds_product_name'] == filtro_prod]
-                        pivot_seg = df_seg.pivot_table(index='day_of_week', columns='hour', values='valor_metrica', aggfunc=agg_func).reindex(days_order)
-                        for h in range(24): 
-                            if h not in pivot_seg.columns: pivot_seg[h] = 0
-                        pivot_seg = pivot_seg[range(24)].fillna(0)
+                    ws_name = f'S{week}_Ventas_Interactivo'
+                    ws = workbook.add_worksheet(ws_name)
+                    
+                    # Filtro Interactivo en Excel
+                    ws.write('A1', 'Seleccione Segmento:', bold_format)
+                    ws.data_validation('B1', {'validate': 'list', 'source': ['Compartida', 'Exclusiva', 'Total']})
+                    ws.write('B1', 'Total', bold_format)
+                    
+                    # Dibujar cabeceras de matriz
+                    ws.write('A3', 'Día / Hora', bold_format)
+                    for c_idx, h in enumerate(range(24)):
+                        ws.write(2, c_idx + 1, h, bold_format)
                         
-                        pivot_seg.to_excel(writer, sheet_name=f'S{week}_{nombre_seg}')
-                        ws_seg = writer.sheets[f'S{week}_{nombre_seg}']
-                        ws_seg.conditional_format(1, 1, len(pivot_seg), len(pivot_seg.columns), 
-                                                  {'type': '2_color_scale', 'min_color': '#FFFFFF', 'max_color': excel_color})
+                    for r_idx, day in enumerate(days_order):
+                        ws.write(r_idx + 3, 0, day, bold_format)
+                        for c_idx, h in enumerate(range(24)):
+                            col_letter = chr(66 + c_idx) if c_idx < 25 else 'Z'
+                            cell_hour = f'{col_letter}$3'
+                            cell_day = f'$A{r_idx + 4}'
+                            
+                            # Fórmula mágica: SUMIFS condicionado al menú desplegable
+                            formula = f'=IF($B$1="Total", SUMIFS(Data_Pivot!E:E, Data_Pivot!A:A, {week}, Data_Pivot!B:B, {cell_day}, Data_Pivot!C:C, {cell_hour}), SUMIFS(Data_Pivot!E:E, Data_Pivot!A:A, {week}, Data_Pivot!B:B, {cell_day}, Data_Pivot!C:C, {cell_hour}, Data_Pivot!D:D, $B$1))'
+                            ws.write_formula(r_idx + 3, c_idx + 1, formula)
+                            
+                    # Colorear matriz con formato condicional
+                    ws.conditional_format(3, 1, 9, 24, {'type': '2_color_scale', 'min_color': '#FFFFFF', 'max_color': excel_color})
                     
-                    # Pestaña Total
-                    pivot_tot = week_df_excel.pivot_table(index='day_of_week', columns='hour', values='valor_metrica', aggfunc=agg_func).reindex(days_order)
-                    for h in range(24): 
-                        if h not in pivot_tot.columns: pivot_tot[h] = 0
-                    pivot_tot = pivot_tot[range(24)].fillna(0)
-                    
-                    pivot_tot.to_excel(writer, sheet_name=f'S{week}_Total')
-                    ws_tot = writer.sheets[f'S{week}_Total']
-                    ws_tot.conditional_format(1, 1, len(pivot_tot), len(pivot_tot.columns), 
-                                              {'type': '2_color_scale', 'min_color': '#FFFFFF', 'max_color': excel_color})
                 else:
-                    # Exportación normal (Absoluto y Porcentaje)
+                    # Reportes estáticos habituales
                     pivot_abs = week_df_excel.pivot_table(index='day_of_week', columns='hour', values='valor_metrica', aggfunc=agg_func).reindex(days_order)
                     for h in range(24): 
                         if h not in pivot_abs.columns: pivot_abs[h] = 0
@@ -301,7 +293,7 @@ if uploaded_file is not None:
                         ws_pct.conditional_format(1, 1, len(pivot_abs), len(pivot_abs.columns), 
                                                   {'type': '2_color_scale', 'min_color': '#FFFFFF', 'max_color': excel_color})
 
-                # --- 2. GENERAR GRÁFICOS WEB (SOLO LO FILTRADO EN LA APP) ---
+                # --- 2. GENERAR GRÁFICOS WEB ---
                 if week_df_web.empty:
                     st.info("No hay registros para mostrar en esta semana según el filtro seleccionado.")
                     continue
@@ -349,7 +341,11 @@ if uploaded_file is not None:
             
             st.divider()
             st.subheader("📥 Descargar Reporte Completo")
-            st.markdown("Descarga el Excel. **Nota:** Si es el reporte de ventas, este archivo incluirá pestañas separadas para el detalle Total, Exclusivo y Compartido.")
+            if tipo_analisis == "Demanda de Reservas (Ventas)":
+                st.markdown("🚀 **¡El archivo interactivo está listo!** Al descargar el Excel, ve a la celda **B1**. Podrás desplegar un menú para alternar entre *Compartida*, *Exclusiva* o *Total*, y el mapa de calor se actualizará mágicamente frente a tus ojos.")
+            else:
+                st.markdown("Descarga tu Excel. Todas las pestañas ya están coloreadas.")
+                
             st.download_button(
                 label="Descargar Reporte en Excel",
                 data=excel_data,
